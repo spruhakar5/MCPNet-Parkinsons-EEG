@@ -2,66 +2,153 @@
 
 Replication of **Qiu et al., 2024** — *A Novel EEG-Based Parkinson's Disease Detection Model Using Multiscale Convolutional Prototype Networks*
 
+---
+
 ## Overview
 
-This project implements a **few-shot learning** approach for detecting Parkinson's Disease (PD) from EEG signals. Unlike traditional deep learning classifiers that need large labeled datasets, MCPNet uses **prototype networks** to classify new subjects using only a handful of labeled EEG samples.
+This project implements a **few-shot learning** approach for detecting Parkinson's Disease (PD) from resting-state EEG signals. Unlike traditional deep learning classifiers that require large labeled datasets, MCPNet uses **prototype networks** — it can classify a new, unseen patient using only a handful of labeled EEG samples, making it practical for real-world clinical settings where labeled data is scarce.
 
-### Key Features
+The implementation covers the **entire pipeline end-to-end**: raw EEG loading, signal preprocessing, feature extraction, model training with episodic learning, and rigorous Leave-One-Subject-Out (LOSO) evaluation across three independent EEG datasets.
 
-- **Multiscale CNN Encoder**: Parallel convolutional branches (kernel sizes 3, 5, 7) capture EEG patterns at multiple resolutions
-- **Prototype-based Classification**: Computes class centroids in embedding space — no retraining needed for new subjects
-- **Prototype Calibration**: Adapts prototypes to each test subject using a few labeled samples
-- **Dual Feature Extraction**: Combines PSD (spectral power) and PLV (phase connectivity)
-- **LOSO Evaluation**: Leave-One-Subject-Out cross-validation for clinically realistic performance estimates
-- **3 EEG Datasets**: UC San Diego, UNM, Iowa (87 total subjects)
+### Why This Matters
+
+- Parkinson's affects ~10 million people worldwide, and early detection is critical
+- EEG is non-invasive and cheap compared to fMRI or PET scans
+- Most prior ML approaches fail on new patients because they overfit to subject-specific patterns
+- MCPNet addresses this with few-shot learning + LOSO validation = realistic generalization
+
+---
+
+## Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Multiscale CNN Encoder** | 3 parallel conv branches (kernel 3, 5, 7) capture fine, medium, and global EEG patterns simultaneously |
+| **Prototype Classification** | Computes class centroids in 128-dim embedding space — classify by nearest prototype, no retraining needed |
+| **Prototype Calibration** | Adapts prototypes to each test subject using a few labeled calibration samples |
+| **Dual Features (PSD + PLV)** | Combines local spectral power (PSD) with inter-regional connectivity (PLV) for richer representation |
+| **LOSO Evaluation** | Leave-One-Subject-Out ensures zero data leakage — every test subject is completely unseen |
+| **3 EEG Datasets** | UC San Diego (31 subjects), UNM (28), Iowa (28) = 87 total subjects |
+| **Synthetic Data Mode** | Built-in synthetic EEG generator for testing the pipeline without downloading real data |
+
+---
 
 ## Project Structure
 
 ```
 MCPNet-Parkinsons-EEG/
 ├── src/
-│   ├── config.py           # Hyperparameters, paths, frequency bands
-│   ├── dataset.py          # Dataset loading + synthetic data generator
-│   ├── preprocessing.py    # EEG preprocessing pipeline (5 steps)
-│   ├── features.py         # PSD and PLV feature extraction
-│   ├── model.py            # MCPNet architecture (PyTorch)
-│   ├── train.py            # Episodic training + LOSO evaluation
-│   └── main.py             # Full pipeline runner (CLI)
+│   ├── config.py           # All hyperparameters, frequency bands, channel config
+│   ├── dataset.py          # Dataset loading (3 datasets) + synthetic generator
+│   ├── preprocessing.py    # 5-step EEG preprocessing pipeline
+│   ├── features.py         # PSD (Welch's method) + PLV (Hilbert transform)
+│   ├── model.py            # MCPNet: multiscale encoder + prototypes + calibration
+│   ├── train.py            # Episodic N-way K-shot training + LOSO evaluation
+│   └── main.py             # Full pipeline runner with CLI arguments
 ├── docs/
-│   └── Phase1_MCPNet_Study.md  # Paper analysis and study notes
+│   └── Phase1_MCPNet_Study.md  # Detailed paper analysis (8 sections)
 ├── data/
 │   ├── raw/                # Place downloaded EEG datasets here
-│   └── processed/          # Pipeline outputs saved here
+│   └── processed/          # Pipeline outputs (results JSON)
+├── requirements.txt
 └── README.md
 ```
 
-## Pipeline
+---
+
+## Full Pipeline
 
 ```
-Raw EEG → Band-pass (0.5-50 Hz) → Notch (50/60 Hz) → ICA → Channel Harmonization (32ch)
-    → Epoch Segmentation (1s) → PSD Extraction → PLV Extraction
-    → MCPNet Encoder → Prototypes → Calibration → Classification (PD vs HC)
+┌─────────────────────────────────────────────────────────────────┐
+│                     DATA LOADING                                │
+│  Load raw EEG (.set/.edf/.bdf) from UC, UNM, Iowa datasets     │
+│  OR generate synthetic EEG for testing                          │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   PREPROCESSING                                 │
+│  1. Band-pass filter (0.5–50 Hz) — remove drift & HF noise     │
+│  2. Notch filter (50/60 Hz) — remove power line interference    │
+│  3. ICA artifact removal — eye blinks, muscle, cardiac          │
+│  4. Channel harmonization — standardize to 32 common channels   │
+│  5. Epoch segmentation — 1-second non-overlapping windows       │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                 FEATURE EXTRACTION                              │
+│  PSD: Power Spectral Density per channel per band               │
+│       → shape: (n_epochs, 32 channels, 5 bands)                │
+│       → bands: delta, theta, alpha, beta, gamma                 │
+│                                                                 │
+│  PLV: Phase Locking Value between all channel pairs             │
+│       → shape: (n_epochs, 32, 32, 5 bands)                     │
+│       → measures functional brain connectivity                  │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     MCPNet MODEL                                │
+│                                                                 │
+│  Multiscale CNN Encoder:                                        │
+│    Branch 1 (3×3) ─┐                                            │
+│    Branch 2 (5×5) ─┼─ concat → FC → 128-dim embedding          │
+│    Branch 3 (7×7) ─┘                                            │
+│                                                                 │
+│  Prototype Computation:                                         │
+│    PD_prototype = mean(PD support embeddings)                   │
+│    HC_prototype = mean(HC support embeddings)                   │
+│                                                                 │
+│  Prototype Calibration:                                         │
+│    calibrated = α·original + (1-α)·test_subject_mean            │
+│                                                                 │
+│  Classification:                                                │
+│    predict = argmin(euclidean_distance(query, prototypes))       │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  LOSO EVALUATION                                │
+│  For each of 87 subjects:                                       │
+│    1. Hold out subject S as test                                │
+│    2. Train on remaining 86 subjects (episodic training)        │
+│    3. Compute prototypes from training support set              │
+│    4. Calibrate prototypes using K samples from subject S       │
+│    5. Classify remaining epochs of subject S                    │
+│    6. Record accuracy, sensitivity, specificity, F1             │
+│  Average across all 87 folds                                    │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## Quick Start
 
-### Install dependencies
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/spruhakar5/MCPNet-Parkinsons-EEG.git
+cd MCPNet-Parkinsons-EEG
+```
+
+### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Run with synthetic data (no downloads needed)
+### 3. Run with synthetic data (no downloads needed)
 
 ```bash
 cd src
 python main.py --n_subjects 10 --k_shot 5 --n_episodes 10 --n_epochs 5
 ```
 
-### Run with real datasets
+### 4. Run with real datasets
 
 ```bash
-# Download datasets from OpenNeuro first (see below)
+# Download from OpenNeuro first (see Datasets section)
 python main.py --real --k_shot 5
 ```
 
@@ -69,55 +156,212 @@ python main.py --real --k_shot 5
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--real` | Use real EEG datasets | synthetic |
-| `--n_subjects` | Synthetic subjects count | 10 |
-| `--k_shot` | K-shot value (1, 5, 10, 20) | all |
-| `--no-plv` | Disable PLV features | enabled |
-| `--no-calibration` | Disable prototype calibration | enabled |
-| `--n_episodes` | Training episodes per epoch | 100 |
-| `--n_epochs` | Training epochs | 50 |
+| `--real` | Use real EEG datasets from `data/raw/` | synthetic |
+| `--n_subjects N` | Number of synthetic subjects to generate | 10 |
+| `--skip_ica` | Skip ICA step (faster for testing) | True |
+| `--k_shot K` | Specific K-shot value (1, 5, 10, or 20) | run all |
+| `--no-plv` | Disable PLV features (PSD only) | PLV enabled |
+| `--no-calibration` | Disable prototype calibration | calibration enabled |
+| `--n_episodes N` | Training episodes per epoch | 100 |
+| `--n_epochs N` | Number of training epochs per fold | 50 |
+
+---
 
 ## Datasets
 
-| Dataset | PD | HC | Sampling Rate | Duration | Source |
-|---------|----|----|---------------|----------|--------|
-| UC San Diego | 15 | 16 | 512 Hz | 3 min | [OpenNeuro ds003490](https://openneuro.org/datasets/ds003490) |
-| UNM | 14 | 14 | 500 Hz | 2 min | [OpenNeuro ds002778](https://openneuro.org/datasets/ds002778) |
-| Iowa | 14 | 14 | 500 Hz | 2 min | OpenNeuro |
+| Dataset | PD Subjects | HC Subjects | Total | Sampling Rate | Duration | Epochs/Subject | Source |
+|---------|-------------|-------------|-------|---------------|----------|----------------|--------|
+| UC San Diego | 15 | 16 | 31 | 512 Hz | 3 min | ~180 | [OpenNeuro ds003490](https://openneuro.org/datasets/ds003490) |
+| UNM | 14 | 14 | 28 | 500 Hz | 2 min | ~120 | [OpenNeuro ds002778](https://openneuro.org/datasets/ds002778) |
+| Iowa | 14 | 14 | 28 | 500 Hz | 2 min | ~120 | OpenNeuro |
+| **Combined** | **43** | **44** | **87** | — | — | **~12,300** | — |
 
-Place downloaded data in `data/raw/UC/`, `data/raw/UNM/`, `data/raw/Iowa/`.
+### Download instructions
 
-## Model Architecture
+```bash
+# Option 1: OpenNeuro CLI
+pip install openneuro-py
+openneuro download --dataset ds003490 data/raw/UC
+openneuro download --dataset ds002778 data/raw/UNM
+
+# Option 2: Manual download from https://openneuro.org
+# Place files in data/raw/<dataset_name>/sub-XXX/eeg/
+```
+
+Each dataset folder should contain a `participants.tsv` with columns `participant_id` and `group` (PD or HC).
+
+---
+
+## Code Walkthrough
+
+### `config.py` — Central Configuration
+
+All hyperparameters in one place. Key settings:
+
+- **32 common EEG channels** (10-20 system) used across all datasets
+- **5 frequency bands**: delta (0.5-4 Hz), theta (4-8), alpha (8-13), beta (13-30), gamma (30-50)
+- **Few-shot settings**: 2-way classification, K-shots of 1/5/10/20
+- **Model**: 128-dim embeddings, kernel sizes [3, 5, 7], Adam optimizer with StepLR
+
+### `dataset.py` — Data Loading
+
+- **`load_all_datasets()`**: Loads real EEG data from `data/raw/` using MNE (supports .set, .edf, .bdf, .fif)
+- **`generate_synthetic_data()`**: Creates fake EEG signals for pipeline testing — PD subjects get boosted theta and reduced beta power (mimicking real PD spectral changes)
+- **`Subject` dataclass**: Carries a subject through the entire pipeline (raw → epochs → PSD/PLV features)
+- Automatically handles `participants.tsv` label parsing and Iowa channel remapping (Pz → Fz)
+
+### `preprocessing.py` — EEG Signal Cleaning
+
+Five sequential steps:
+
+1. **Band-pass filter (0.5–50 Hz)**: FIR filter removes DC drift and high-frequency noise while retaining all relevant brain rhythms
+2. **Notch filter (50/60 Hz)**: Removes power line interference (applies both frequencies — harmless if one isn't present)
+3. **ICA artifact removal**: FastICA with automatic EOG component detection using frontal channels (Fp1, Fp2). Falls back to kurtosis-based heuristic if auto-detection fails. Removes at most 5 components
+4. **Channel harmonization**: Case-insensitive matching to select and reorder 32 standard channels across all datasets
+5. **Epoch segmentation**: 1-second non-overlapping windows using MNE's fixed-length events
+
+### `features.py` — PSD and PLV Extraction
+
+**PSD (Power Spectral Density)**:
+- Computed per channel using **Welch's method** (scipy.signal.welch)
+- Averages power within each of the 5 frequency bands
+- Output: `(n_epochs, 32, 5)` — captures *local* neural activity
+
+**PLV (Phase Locking Value)**:
+- For each frequency band: band-pass filter → Hilbert transform → extract instantaneous phase
+- PLV = |mean(exp(j * phase_difference))| for each channel pair
+- Output: `(n_epochs, 32, 32, 5)` — captures *network-level* synchronization
+- Symmetric matrix with diagonal = 1
+
+### `model.py` — MCPNet Architecture
+
+**ConvBranch**: Conv2d → BatchNorm → ReLU → Conv2d → BatchNorm → ReLU → AdaptiveAvgPool
+
+**MultiscaleEncoder**: 3 parallel ConvBranches (kernels 3, 5, 7) → concatenate → FC → BatchNorm → ReLU → 128-dim embedding
+
+**MCPNet**:
+- Separate encoders for PSD (1-channel input) and PLV (5-channel input)
+- Fusion layer combines both embeddings
+- `compute_prototypes()`: Mean embedding per class from support set
+- `calibrate_prototypes()`: Weighted average of training prototype and test-subject mean
+- `classify()`: Euclidean distance → softmax → nearest prototype
+
+### `train.py` — Episodic Training and LOSO
+
+**Episode creation**: Randomly samples K support + N query epochs per class from available subjects
+
+**Training loop**: For each episode → encode support/query → compute prototypes → classify queries → NLL loss → backprop
+
+**LOSO evaluation**: Fresh model per fold → train on 86 subjects → test on held-out subject → calibrate with K test-subject epochs → classify remaining epochs → aggregate metrics (accuracy, sensitivity, specificity, F1)
+
+### `main.py` — Pipeline Runner
+
+Orchestrates the full pipeline: load data → preprocess → extract features → run LOSO for each K-shot setting → save results to JSON → print summary table.
+
+---
+
+## Model Architecture Diagram
 
 ```
-Input: PSD (32×5) + PLV (32×32×5)
-         │
-    Multiscale CNN Encoder
-    ├── Branch 1 (3×3 kernel) ── fine-grained patterns
-    ├── Branch 2 (5×5 kernel) ── medium-scale patterns
-    └── Branch 3 (7×7 kernel) ── global patterns
-         │
-    Concatenate → FC → 128-dim embedding
-         │
-    ┌────┴────┐
-  Support   Query
-    │         │
-  Prototypes  │
-    │         │
-  Calibrate   │
-    │         │
-  Distance ───┘
+Input Features
+├── PSD: (batch, 32, 5)          ← spectral power per channel per band
+└── PLV: (batch, 32, 32, 5)     ← phase connectivity between all channel pairs
+         │                │
+         ▼                ▼
+┌─────────────┐  ┌──────────────┐
+│ PSD Encoder │  │  PLV Encoder │
+│ (1-ch input)│  │ (5-ch input) │
+│             │  │              │
+│ ┌─────────┐ │  │ ┌──────────┐│
+│ │ 3×3 conv│ │  │ │ 3×3 conv ││
+│ │ 5×5 conv│ │  │ │ 5×5 conv ││
+│ │ 7×7 conv│ │  │ │ 7×7 conv ││
+│ └────┬────┘ │  │ └─────┬────┘│
+│   concat    │  │    concat   │
+│   FC→128    │  │    FC→128   │
+└──────┬──────┘  └──────┬──────┘
+       │                │
+       └───── concat ───┘
+              │
+         FC → 128-dim
+         (fused embedding)
+              │
+    ┌─────────┴──────────┐
+    ▼                    ▼
+ Support              Query
+ Embeddings           Embeddings
     │
-  PD or HC
+    ▼
+ Prototypes
+ (mean per class)
+    │
+    ▼
+ Calibrate with
+ test subject samples
+    │
+    ▼
+ Euclidean distance
+ to each prototype
+    │
+    ▼
+ Prediction: PD or HC
 ```
 
-## Results (Synthetic Data Test)
+---
 
-| K-shot | Accuracy | Sensitivity | Specificity | F1 |
-|--------|----------|-------------|-------------|-----|
-| 5 | 0.9797 | 0.9594 | 1.0000 | 0.979 |
+## Evaluation Strategy
 
-*Note: Synthetic data has exaggerated PD/HC differences. Real data results will be lower and more clinically meaningful.*
+### Why LOSO over K-Fold?
+
+| Method | Data Leakage? | Clinical Realism | Typical Reported Accuracy |
+|--------|---------------|------------------|--------------------------|
+| **K-Fold CV** | Yes — epochs from same subject in train+test | Low — never encounters truly unseen patient | >99% (inflated) |
+| **LOSO** | No — entire subject held out | High — simulates new patient encounter | 60-85% (realistic) |
+
+### Few-Shot Episode Structure (2-way K-shot)
+
+```
+Support Set:           Query Set:
+┌─────────────────┐    ┌─────────────────┐
+│ K epochs (HC)   │    │ N epochs (HC)   │ ← classify these
+│ K epochs (PD)   │    │ N epochs (PD)   │
+└─────────────────┘    └─────────────────┘
+        │                      │
+        ▼                      ▼
+  Compute prototypes    Compare to prototypes
+  (mean embedding       (nearest = prediction)
+   per class)
+```
+
+---
+
+## Results
+
+### Synthetic Data Benchmark (6 subjects, K=5)
+
+| Metric | Value |
+|--------|-------|
+| Overall Accuracy | 97.97% |
+| Sensitivity (PD recall) | 95.94% |
+| Specificity (HC recall) | 100.00% |
+| F1 Score | 0.979 |
+| Confusion Matrix | TN=345, FP=0, FN=14, TP=331 |
+
+*Synthetic data uses exaggerated PD/HC spectral differences for pipeline validation. Real dataset results will be lower and more clinically meaningful, consistent with LOSO evaluation rigor.*
+
+---
+
+## Frequency Bands and Their Relevance to PD
+
+| Band | Range | Brain Activity | PD Signature |
+|------|-------|----------------|--------------|
+| Delta (δ) | 0.5–4 Hz | Deep sleep, unconscious | Increased in advanced PD |
+| Theta (θ) | 4–8 Hz | Drowsiness, memory | **Increased** — cortical slowing |
+| Alpha (α) | 8–13 Hz | Relaxed wakefulness | Altered resting-state patterns |
+| Beta (β) | 13–30 Hz | Motor planning, focus | **Decreased** — motor dysfunction |
+| Gamma (γ) | 30–50 Hz | Higher cognition | Variable changes |
+
+---
 
 ## Reference
 
