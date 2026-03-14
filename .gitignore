@@ -1,0 +1,45 @@
+# Data
+data/raw/
+data/processed/
+*.npy
+*.npz
+*.edf
+*.bdf
+*.set
+*.fdt
+*.vhdr
+*.vmrk
+*.eeg
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environments
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbbs.db
+
+# Model checkpoints
+*.pth
+*.pt
+models/
+
+# Jupyter
+.ipynb_checkpoints/
