@@ -39,6 +39,7 @@ The implementation covers the **entire pipeline end-to-end**: raw EEG loading, s
 MCPNet-Parkinsons-EEG/
 ├── src/
 │   ├── config.py           # All hyperparameters, frequency bands, channel config
+│   ├── download_data.py    # Auto-download datasets from OpenNeuro
 │   ├── dataset.py          # Dataset loading (3 datasets) + synthetic generator
 │   ├── preprocessing.py    # 5-step EEG preprocessing pipeline
 │   ├── features.py         # PSD (Welch's method) + PLV (Hilbert transform)
@@ -50,6 +51,7 @@ MCPNet-Parkinsons-EEG/
 ├── data/
 │   ├── raw/                # Place downloaded EEG datasets here
 │   └── processed/          # Pipeline outputs (results JSON)
+├── setup.sh                # One-command setup (deps + data download)
 ├── requirements.txt
 └── README.md
 ```
@@ -176,19 +178,39 @@ python main.py --real --k_shot 5
 | Iowa | 14 | 14 | 28 | 500 Hz | 2 min | ~120 | OpenNeuro |
 | **Combined** | **43** | **44** | **87** | — | — | **~12,300** | — |
 
-### Download instructions
+### Automated Download (Recommended)
 
 ```bash
-# Option 1: OpenNeuro CLI
+# One-command setup: installs deps + downloads all 3 datasets
+bash setup.sh
+
+# Or download datasets individually:
+cd src
+python download_data.py --dataset UC     # UC San Diego only
+python download_data.py --dataset UNM    # UNM only
+python download_data.py --dataset Iowa   # Iowa only
+python download_data.py --dataset all    # All three
+
+# Verify downloads:
+python download_data.py --verify
+```
+
+The download script auto-fetches from OpenNeuro using `openneuro-py`. Falls back to AWS S3 direct download if needed. If both fail, it prints manual download URLs.
+
+### Manual Download (Fallback)
+
+```bash
 pip install openneuro-py
 openneuro download --dataset ds003490 data/raw/UC
 openneuro download --dataset ds002778 data/raw/UNM
-
-# Option 2: Manual download from https://openneuro.org
-# Place files in data/raw/<dataset_name>/sub-XXX/eeg/
+openneuro download --dataset ds004584 data/raw/Iowa
 ```
 
+Or download directly from https://openneuro.org and place files in `data/raw/<dataset_name>/`.
+
 Each dataset folder should contain a `participants.tsv` with columns `participant_id` and `group` (PD or HC).
+
+> **Note**: Raw EEG data is several GB and is not stored in this repo. The `download_data.py` script fetches it from OpenNeuro on demand.
 
 ---
 
