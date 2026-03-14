@@ -127,31 +127,42 @@ MCPNet-Parkinsons-EEG/
 
 ## Quick Start
 
-### 1. Clone the repository
+> **Clone, setup, run — 3 commands.** The raw EEG data (87 subjects, 3 datasets) is automatically downloaded from OpenNeuro when you run the setup script. No manual downloads needed.
 
+```bash
+git clone https://github.com/spruhakar5/MCPNet-Parkinsons-EEG.git
+cd MCPNet-Parkinsons-EEG
+bash setup.sh              # installs all deps + downloads all 3 EEG datasets from OpenNeuro
+cd src && python main.py --real --k_shot 5   # run full pipeline on real data
+```
+
+### Step-by-step (if you prefer manual control)
+
+**1. Clone the repository**
 ```bash
 git clone https://github.com/spruhakar5/MCPNet-Parkinsons-EEG.git
 cd MCPNet-Parkinsons-EEG
 ```
 
-### 2. Install dependencies
-
+**2. Install dependencies**
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Run with synthetic data (no downloads needed)
-
+**3. Download the real EEG datasets**
 ```bash
 cd src
-python main.py --n_subjects 10 --k_shot 5 --n_episodes 10 --n_epochs 5
+python download_data.py --dataset all    # fetches UC, UNM, Iowa from OpenNeuro
+python download_data.py --verify         # confirm downloads
 ```
 
-### 4. Run with real datasets
-
+**4. Run the pipeline**
 ```bash
-# Download from OpenNeuro first (see Datasets section)
+# With real data:
 python main.py --real --k_shot 5
+
+# Or test with synthetic data first (no download needed):
+python main.py --n_subjects 10 --k_shot 5 --n_episodes 10 --n_epochs 5
 ```
 
 ### CLI Options
